@@ -1,27 +1,75 @@
+//! zig-hue-lightsync CLI entry point
+//! Wayland-only Philips Hue screen sync for Linux
 const std = @import("std");
-const zig_hue = @import("zig_hue");
+const root = @import("root.zig");
+const cli = root.cli;
 
 pub fn main() !void {
-    // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try zig_hue.bufferedPrint();
-}
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+    var stdout_buffer: [4096]u8 = undefined;
+    var stderr_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+    const stdout = &stdout_writer.interface;
+    const stderr = &stderr_writer.interface;
 
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
+    const command = cli.parseArgs(allocator) catch |err| {
+        switch (err) {
+            cli.CliError.MissingArgument => {
+                try stderr.writeAll("Error: Missing required argument\n\n");
+                try cli.printHelp(stderr);
+            },
+            cli.CliError.InvalidArgument => {
+                try stderr.writeAll("Error: Invalid argument value\n\n");
+                try cli.printHelp(stderr);
+            },
+            cli.CliError.UnknownCommand => {
+                try stderr.writeAll("Error: Unknown command\n\n");
+                try cli.printHelp(stderr);
+            },
+            else => {
+                try stderr.print("Error: {}\n", .{err});
+            },
         }
+        std.process.exit(1);
     };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+
+    switch (command) {
+        .discover => |opts| {
+            try cli.executeDiscover(allocator, opts, stdout);
+        },
+        .pair => |opts| {
+            try cli.executePair(allocator, opts, stdout);
+        },
+        .status => {
+            try cli.executeStatus(allocator, stdout);
+        },
+        .areas => {
+            try cli.executeAreas(allocator, stdout);
+        },
+        .start => |_| {
+            try stdout.writeAll("Screen sync not yet implemented (M2-M4).\n");
+            try stdout.writeAll("This will be available after Wayland capture is implemented.\n");
+        },
+        .stop => {
+            try stdout.writeAll("Stop not yet implemented (M4).\n");
+        },
+        .help => {
+            try cli.printHelp(stdout);
+        },
+        .version => {
+            try cli.printVersion(stdout);
+        },
+    }
+
+    // Flush output buffers
+    try stdout.flush();
+}
+
+test "main module" {
+    // Import root to run all tests
+    _ = root;
 }

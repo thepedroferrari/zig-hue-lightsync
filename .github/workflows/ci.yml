@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.2
+      - name: Check formatting
+        run: zig fmt --check src/
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - native
+          - x86_64-linux-gnu
+          - aarch64-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.2
+      - name: Build (${{ matrix.target }})
+        run: |
+          if [ "${{ matrix.target }}" = "native" ]; then
+            zig build
+          else
+            zig build -Dtarget=${{ matrix.target }}
+          fi
+      - name: Upload artifact
+        if: matrix.target == 'native'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zig-hue-lightsync-linux
+          path: zig-out/bin/zig-hue-lightsync
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.2
+      - name: Run tests
+        run: zig build test
+
