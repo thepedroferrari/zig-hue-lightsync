@@ -59,6 +59,26 @@ else
         }
     };
 
+// Wayland-native GUI module (optional, Linux with layer-shell)
+// Compile with -Denable-wayland-gui=true to enable
+// This is the "cool kids" GUI using raw Wayland protocols
+pub const wayland_gui = if (build_options.enable_wayland_gui)
+    @import("wayland_gui_impl")
+else
+    struct {
+        // Stub types when Wayland GUI is disabled
+        pub const App = void;
+        pub const GuiError = error{NotSupported};
+
+        pub fn isSupported() bool {
+            return false;
+        }
+
+        pub fn launch(_: std.mem.Allocator) GuiError!void {
+            return GuiError.NotSupported;
+        }
+    };
+
 // Entertainment streaming module
 pub const streaming = struct {
     const protocol_mod = @import("streaming/protocol.zig");

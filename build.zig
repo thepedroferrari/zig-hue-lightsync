@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) void {
     // Build options for optional features (require Linux + system libs)
     const enable_capture = b.option(bool, "enable-capture", "Enable Wayland screen capture (requires libdbus-1, libpipewire-0.3)") orelse false;
     const enable_gui = b.option(bool, "enable-gui", "Enable GTK4 GUI (requires libgtk-4)") orelse false;
+    const enable_wayland_gui = b.option(bool, "enable-wayland-gui", "Enable native Wayland GUI with layer-shell (requires libwayland, cairo, dbus)") orelse false;
 
     // Library module - exports core functionality
     const lib_mod = b.addModule("zig_hue", .{
@@ -19,8 +20,10 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
     const capture_enabled = enable_capture and target.result.os.tag == .linux;
     const gui_enabled = enable_gui and target.result.os.tag == .linux;
+    const wayland_gui_enabled = enable_wayland_gui and target.result.os.tag == .linux;
     options.addOption(bool, "enable_capture", capture_enabled);
     options.addOption(bool, "enable_gui", gui_enabled);
+    options.addOption(bool, "enable_wayland_gui", wayland_gui_enabled);
     lib_mod.addOptions("build_options", options);
 
     // Conditionally add capture module (only on Linux with capture enabled)
@@ -40,6 +43,16 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         });
         lib_mod.addImport("gui_impl", gui_mod);
+    }
+
+    // Conditionally add Wayland-native GUI (layer-shell based)
+    if (wayland_gui_enabled) {
+        const wayland_gui_mod = b.addModule("wayland_gui_impl", .{
+            .root_source_file = b.path("src/gui/wayland/app.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        lib_mod.addImport("wayland_gui_impl", wayland_gui_mod);
     }
 
     // Main executable
@@ -87,6 +100,26 @@ pub fn build(b: *std.Build) void {
         exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/gdk-pixbuf-2.0" });
         exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/graphene-1.0" });
         exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu/graphene-1.0/include" });
+
+        exe.root_module.link_libc = true;
+    }
+
+    // Link Wayland + Cairo for native Wayland GUI (Linux only)
+    if (wayland_gui_enabled) {
+        // Wayland client libraries
+        exe.root_module.linkSystemLibrary("wayland-client", .{});
+        exe.root_module.linkSystemLibrary("wayland-cursor", .{});
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include" });
+
+        // Cairo for rendering
+        exe.root_module.linkSystemLibrary("cairo", .{});
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/cairo" });
+
+        // DBus for SNI tray
+        exe.root_module.linkSystemLibrary("dbus-1", .{});
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/dbus-1.0" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu/dbus-1.0/include" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/lib/dbus-1.0/include" });
 
         exe.root_module.link_libc = true;
     }
