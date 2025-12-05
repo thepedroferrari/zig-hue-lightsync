@@ -11,6 +11,7 @@ pub const Command = union(enum) {
     areas: void,
     start: StartOptions,
     stop: void,
+    scene: SceneOptions,
     help: void,
     version: void,
 
@@ -26,6 +27,11 @@ pub const Command = union(enum) {
         area_id: ?[]const u8 = null,
         fps_tier: config.Config.FpsTier = .high,
         brightness: ?u8 = null,
+    };
+
+    pub const SceneOptions = struct {
+        name: ?[]const u8 = null,
+        list: bool = false,
     };
 };
 
@@ -100,6 +106,20 @@ pub fn parseArgs(allocator: std.mem.Allocator) !Command {
         return .stop;
     }
 
+    if (std.mem.eql(u8, cmd_str, "scene")) {
+        var opts = Command.SceneOptions{};
+
+        while (args.next()) |arg| {
+            if (std.mem.eql(u8, arg, "--list") or std.mem.eql(u8, arg, "-l")) {
+                opts.list = true;
+            } else if (!std.mem.startsWith(u8, arg, "-")) {
+                opts.name = arg;
+            }
+        }
+
+        return .{ .scene = opts };
+    }
+
     if (std.mem.eql(u8, cmd_str, "help") or std.mem.eql(u8, cmd_str, "--help") or std.mem.eql(u8, cmd_str, "-h")) {
         return .help;
     }
@@ -136,6 +156,10 @@ pub fn printHelp(writer: anytype) !void {
         \\        -b, --brightness <N>  Brightness 0-100 (default: from config)
         \\
         \\    stop                  Stop screen sync and restore previous light state
+        \\
+        \\    scene [NAME]          Apply a preset scene or list available scenes
+        \\        -l, --list            List all available preset scenes
+        \\        NAME                  Scene name: cozy, bright, reading, warm_amber, cool_focus, night
         \\
         \\    help                  Show this help message
         \\    version               Show version information
@@ -348,6 +372,143 @@ pub fn executeAreas(allocator: std.mem.Allocator, writer: anytype) !void {
 
     try writer.writeAll("To start syncing, run:\n");
     try writer.print("  {s} start --area <ID>\n", .{APP_NAME});
+}
+
+/// Execute the start command
+pub fn executeStart(allocator: std.mem.Allocator, opts: Command.StartOptions, writer: anytype) !void {
+    const root = @import("root.zig");
+
+    var cfg_manager = try config.ConfigManager.init(allocator);
+    defer cfg_manager.deinit();
+
+    var cfg = cfg_manager.load() catch |err| {
+        try writer.print("Could not load configuration: {}\n", .{err});
+        return;
+    };
+    defer cfg.deinit(allocator);
+
+    if (!cfg.isPaired()) {
+        try writer.writeAll("Not paired with a bridge. Run 'pair <IP>' first.\n");
+        return;
+    }
+
+    // Check for entertainment area
+    const area_id = opts.area_id orelse cfg.entertainment_area_id orelse {
+        try writer.writeAll("No entertainment area specified.\n");
+        try writer.writeAll("Use --area <ID> or set a default in the config.\n");
+        try writer.print("Run '{s} areas' to list available areas.\n", .{APP_NAME});
+        return;
+    };
+
+    // Check platform support
+    if (!root.isCaptureAvailable()) {
+        try writer.writeAll("Screen capture is only supported on Linux with Wayland.\n");
+        try writer.writeAll("This feature requires:\n");
+        try writer.writeAll("  - Linux operating system\n");
+        try writer.writeAll("  - Wayland compositor (KDE Plasma, GNOME, Sway, etc.)\n");
+        try writer.writeAll("  - PipeWire\n");
+        try writer.writeAll("  - Build with: zig build -Denable-capture=true\n");
+        return;
+    }
+
+    const fps = opts.fps_tier.toFps();
+    const brightness = opts.brightness orelse cfg.brightness;
+
+    try writer.print("Starting screen sync...\n", .{});
+    try writer.print("  Bridge: {s}\n", .{cfg.bridge_ip.?});
+    try writer.print("  Entertainment Area: {s}\n", .{area_id});
+    try writer.print("  FPS Tier: {s} ({d} fps)\n", .{ opts.fps_tier.toString(), fps });
+    try writer.print("  Brightness: {d}%\n", .{brightness});
+    try writer.writeAll("\n");
+
+    // Initialize capture
+    var screen_capture = root.capture.ScreenCapture.init(allocator);
+    defer screen_capture.deinit();
+
+    try writer.writeAll("Requesting screen capture permission...\n");
+    try writer.writeAll("(A system dialog should appear to select your screen)\n\n");
+
+    screen_capture.requestPermission(.{
+        .target_fps = fps,
+    }) catch |err| {
+        try writer.print("Failed to get screen capture permission: {}\n", .{err});
+        if (err == error.NotSupported) {
+            try writer.writeAll("Build with -Denable-capture=true on Linux.\n");
+        }
+        return;
+    };
+
+    try writer.writeAll("Permission granted! Starting capture...\n");
+
+    // Start capture loop
+    screen_capture.start() catch |err| {
+        try writer.print("Failed to start capture: {}\n", .{err});
+        return;
+    };
+
+    try writer.writeAll("Screen sync is now running.\n");
+    try writer.print("Press Ctrl+C to stop, or run '{s} stop'.\n", .{APP_NAME});
+}
+
+/// Execute the scene command
+pub fn executeScene(allocator: std.mem.Allocator, opts: Command.SceneOptions, writer: anytype) !void {
+    const root = @import("root.zig");
+
+    if (opts.list) {
+        try writer.writeAll("Available preset scenes:\n\n");
+        try writer.writeAll("  Name          Brightness  Color (xy)\n");
+        try writer.writeAll("  ────────────────────────────────────────\n");
+
+        for (root.scenes.presets.all()) |scene| {
+            try writer.print("  {s:<12}  {d:>3}%        ({d:.2}, {d:.2})\n", .{
+                scene.name,
+                scene.brightness,
+                scene.color_xy.x,
+                scene.color_xy.y,
+            });
+        }
+
+        try writer.writeAll("\nUsage: ");
+        try writer.print("{s} scene <NAME>\n", .{APP_NAME});
+        return;
+    }
+
+    const scene_name = opts.name orelse {
+        try writer.writeAll("No scene specified.\n");
+        try writer.print("Run '{s} scene --list' to see available scenes.\n", .{APP_NAME});
+        return;
+    };
+
+    const scene = root.scenes.presets.findByName(scene_name) orelse {
+        try writer.print("Unknown scene: {s}\n", .{scene_name});
+        try writer.print("Run '{s} scene --list' to see available scenes.\n", .{APP_NAME});
+        return;
+    };
+
+    var cfg_manager = try config.ConfigManager.init(allocator);
+    defer cfg_manager.deinit();
+
+    var cfg = cfg_manager.load() catch |err| {
+        try writer.print("Could not load configuration: {}\n", .{err});
+        return;
+    };
+    defer cfg.deinit(allocator);
+
+    if (!cfg.isPaired()) {
+        try writer.writeAll("Not paired with a bridge. Run 'pair <IP>' first.\n");
+        try writer.writeAll("Note: Scene preview only - lights not changed.\n\n");
+    }
+
+    try writer.print("Scene: {s}\n", .{scene.name});
+    try writer.print("  Brightness: {d}%\n", .{scene.brightness});
+    try writer.print("  Color (xy): ({d:.3}, {d:.3})\n", .{ scene.color_xy.x, scene.color_xy.y });
+
+    if (!cfg.isPaired()) {
+        try writer.writeAll("\nPair with a bridge to apply this scene to your lights.\n");
+    } else {
+        try writer.writeAll("\nApplying scene to lights...\n");
+        try writer.writeAll("(Scene application via v2 API not yet implemented)\n");
+    }
 }
 
 test "parse discover command" {

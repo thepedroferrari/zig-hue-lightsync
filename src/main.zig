@@ -50,12 +50,14 @@ pub fn main() !void {
         .areas => {
             try cli.executeAreas(allocator, stdout);
         },
-        .start => |_| {
-            try stdout.writeAll("Screen sync not yet implemented (M2-M4).\n");
-            try stdout.writeAll("This will be available after Wayland capture is implemented.\n");
+        .start => |opts| {
+            try cli.executeStart(allocator, opts, stdout);
         },
         .stop => {
             try stdout.writeAll("Stop not yet implemented (M4).\n");
+        },
+        .scene => |opts| {
+            try cli.executeScene(allocator, opts, stdout);
         },
         .help => {
             try cli.printHelp(stdout);

@@ -4,6 +4,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Build option to enable Wayland capture (requires Linux + system libs)
+    const enable_capture = b.option(bool, "enable-capture", "Enable Wayland screen capture (requires libdbus-1, libpipewire-0.3)") orelse false;
+
     // Library module - exports core functionality
     const lib_mod = b.addModule("zig_hue", .{
         .root_source_file = b.path("src/root.zig"),
@@ -23,6 +26,23 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+
+    // Link system libraries for capture module (Linux only)
+    if (enable_capture) {
+        // DBus for portal communication
+        exe.root_module.linkSystemLibrary("dbus-1", .{});
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/dbus-1.0" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu/dbus-1.0/include" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/lib/dbus-1.0/include" });
+
+        // PipeWire for frame capture
+        exe.root_module.linkSystemLibrary("pipewire-0.3", .{});
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/pipewire-0.3" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
+
+        // Link libc
+        exe.root_module.link_libc = true;
+    }
 
     b.installArtifact(exe);
 
