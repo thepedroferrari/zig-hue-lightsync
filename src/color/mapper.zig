@@ -226,8 +226,9 @@ pub const FrameProcessor = struct {
     }
 
     /// Get the light IDs in order
-    pub fn getLightIds(self: *const Self) []const []const u8 {
-        var ids = self.allocator.alloc([]const u8, self.regions.len) catch return &.{};
+    /// Caller owns returned slice and must free with allocator.free()
+    pub fn getLightIds(self: *const Self) ![]const []const u8 {
+        const ids = try self.allocator.alloc([]const u8, self.regions.len);
         for (self.regions, 0..) |region, i| {
             ids[i] = region.light_id;
         }

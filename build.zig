@@ -4,8 +4,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Build option to enable Wayland capture (requires Linux + system libs)
+    // Build options for optional features (require Linux + system libs)
     const enable_capture = b.option(bool, "enable-capture", "Enable Wayland screen capture (requires libdbus-1, libpipewire-0.3)") orelse false;
+    const enable_gui = b.option(bool, "enable-gui", "Enable GTK4 GUI (requires libgtk-4)") orelse false;
 
     // Library module - exports core functionality
     const lib_mod = b.addModule("zig_hue", .{
@@ -13,6 +14,33 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    // Pass build options as compile-time constants
+    const options = b.addOptions();
+    const capture_enabled = enable_capture and target.result.os.tag == .linux;
+    const gui_enabled = enable_gui and target.result.os.tag == .linux;
+    options.addOption(bool, "enable_capture", capture_enabled);
+    options.addOption(bool, "enable_gui", gui_enabled);
+    lib_mod.addOptions("build_options", options);
+
+    // Conditionally add capture module (only on Linux with capture enabled)
+    if (capture_enabled) {
+        lib_mod.addImport("capture_impl", b.addModule("capture_impl", .{
+            .root_source_file = b.path("src/capture/capture.zig"),
+            .target = target,
+            .optimize = optimize,
+        }));
+    }
+
+    // Conditionally add GUI modules (only on Linux with GUI enabled)
+    if (gui_enabled) {
+        const gui_mod = b.addModule("gui_impl", .{
+            .root_source_file = b.path("src/gui/app.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        lib_mod.addImport("gui_impl", gui_mod);
+    }
 
     // Main executable
     const exe = b.addExecutable(.{
@@ -26,6 +54,9 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+
+    // Add build options to exe module as well
+    exe.root_module.addOptions("build_options", options);
 
     // Link system libraries for capture module (Linux only)
     if (enable_capture) {
@@ -41,6 +72,22 @@ pub fn build(b: *std.Build) void {
         exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
 
         // Link libc
+        exe.root_module.link_libc = true;
+    }
+
+    // Link GTK4 for GUI (Linux only)
+    if (enable_gui) {
+        exe.root_module.linkSystemLibrary("gtk4", .{});
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/gtk-4.0" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/glib-2.0" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu/glib-2.0/include" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/pango-1.0" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/harfbuzz" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/cairo" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/gdk-pixbuf-2.0" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include/graphene-1.0" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu/graphene-1.0/include" });
+
         exe.root_module.link_libc = true;
     }
 

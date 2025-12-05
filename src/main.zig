@@ -59,6 +59,9 @@ pub fn main() !void {
         .scene => |opts| {
             try cli.executeScene(allocator, opts, stdout);
         },
+        .gui => {
+            try cli.executeGui(allocator, stdout);
+        },
         .help => {
             try cli.printHelp(stdout);
         },

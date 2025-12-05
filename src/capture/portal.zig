@@ -133,8 +133,13 @@ pub const PortalClient = struct {
         _ = dbus.messageIterOpenContainer(&iter, dbus.DBUS_TYPE_ARRAY, "{sv}", &dict_iter);
 
         // Add handle_token
-        try self.appendDictEntry(&dict_iter, "handle_token", try self.generateToken("request"));
-        try self.appendDictEntry(&dict_iter, "session_handle_token", try self.generateToken("session"));
+        const request_token = try self.generateToken("request");
+        defer self.allocator.free(request_token);
+        try self.appendDictEntry(&dict_iter, "handle_token", request_token);
+
+        const session_token = try self.generateToken("session");
+        defer self.allocator.free(session_token);
+        try self.appendDictEntry(&dict_iter, "session_handle_token", session_token);
 
         _ = dbus.messageIterCloseContainer(&iter, &dict_iter);
 
@@ -168,7 +173,9 @@ pub const PortalClient = struct {
         var dict_iter: dbus.MessageIter = undefined;
         _ = dbus.messageIterOpenContainer(&iter, dbus.DBUS_TYPE_ARRAY, "{sv}", &dict_iter);
 
-        try self.appendDictEntry(&dict_iter, "handle_token", try self.generateToken("select"));
+        const select_token = try self.generateToken("select");
+        defer self.allocator.free(select_token);
+        try self.appendDictEntry(&dict_iter, "handle_token", select_token);
         try self.appendDictEntryU32(&dict_iter, "types", @intFromEnum(options.capture_type));
         try self.appendDictEntryU32(&dict_iter, "cursor_mode", @intFromEnum(options.cursor_mode));
         try self.appendDictEntryBool(&dict_iter, "multiple", options.multiple);
@@ -208,7 +215,9 @@ pub const PortalClient = struct {
         // Options dict
         var dict_iter: dbus.MessageIter = undefined;
         _ = dbus.messageIterOpenContainer(&iter, dbus.DBUS_TYPE_ARRAY, "{sv}", &dict_iter);
-        try self.appendDictEntry(&dict_iter, "handle_token", try self.generateToken("start"));
+        const start_token = try self.generateToken("start");
+        defer self.allocator.free(start_token);
+        try self.appendDictEntry(&dict_iter, "handle_token", start_token);
         _ = dbus.messageIterCloseContainer(&iter, &dict_iter);
 
         var reply = dbus.connectionSendWithReply(self.dbus_conn.?, msg, 30000) orelse return PortalError.StartFailed;

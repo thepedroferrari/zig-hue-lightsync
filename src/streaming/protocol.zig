@@ -56,7 +56,8 @@ pub const Frame = struct {
     area_id: [16]u8 = .{0} ** 16,
 
     const HEADER_SIZE = 52;
-    const LIGHT_SIZE = 7;
+    // Per light: 1 (device type) + 2 (device ID) + 2 (x) + 2 (y) + 2 (brightness) = 9 bytes
+    const LIGHT_SIZE = 9;
 
     /// Encode frame header
     pub fn encodeHeader(self: *Frame, buffer: []u8) !usize {

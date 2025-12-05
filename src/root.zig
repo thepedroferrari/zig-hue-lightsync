@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 
 // Core modules
 pub const config = @import("config.zig");
@@ -39,6 +40,25 @@ pub const color = struct {
     pub const LightPosition = mapper_mod.LightPosition;
 };
 
+// GUI module (optional, Linux with GTK4 only)
+// Compile with -Denable-gui=true to enable
+pub const gui = if (build_options.enable_gui)
+    @import("gui_impl")
+else
+    struct {
+        // Stub types when GUI is disabled
+        pub const App = void;
+        pub const GuiError = error{NotSupported};
+
+        pub fn isSupported() bool {
+            return false;
+        }
+
+        pub fn launch(_: std.mem.Allocator) GuiError!void {
+            return GuiError.NotSupported;
+        }
+    };
+
 // Entertainment streaming module
 pub const streaming = struct {
     const protocol_mod = @import("streaming/protocol.zig");
@@ -61,49 +81,51 @@ pub const streaming = struct {
 
 // Capture module (Linux only, requires system libraries)
 // Compile with -Denable-capture=true to enable
-// On non-Linux platforms, these are stub types
-pub const capture = struct {
-    // These will only be used on Linux with capture enabled
-    // For now, provide stub types that allow the code to compile anywhere
-    pub const ScreenCapture = struct {
-        allocator: std.mem.Allocator,
+// On non-Linux platforms or without -Denable-capture, these are stub types
+pub const capture = if (build_options.enable_capture)
+    @import("capture_impl")
+else
+    struct {
+        // Stub types for non-Linux platforms or when capture is disabled
+        pub const ScreenCapture = struct {
+            allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator) @This() {
-            return .{ .allocator = allocator };
-        }
+            pub fn init(allocator: std.mem.Allocator) @This() {
+                return .{ .allocator = allocator };
+            }
 
-        pub fn deinit(_: *@This()) void {}
+            pub fn deinit(_: *@This()) void {}
 
-        pub fn requestPermission(_: *@This(), _: CaptureOptions) !void {
-            return error.NotSupported;
-        }
+            pub fn requestPermission(_: *@This(), _: CaptureOptions) !void {
+                return error.NotSupported;
+            }
 
-        pub fn start(_: *@This()) !void {
-            return error.NotSupported;
-        }
+            pub fn start(_: *@This()) !void {
+                return error.NotSupported;
+            }
 
-        pub fn stop(_: *@This()) void {}
+            pub fn stop(_: *@This()) void {}
 
-        pub fn isCapturing(_: *const @This()) bool {
-            return false;
-        }
+            pub fn isCapturing(_: *const @This()) bool {
+                return false;
+            }
+        };
+
+        pub const Frame = struct {
+            data: []const u8,
+            width: u32,
+            height: u32,
+            stride: u32,
+            format: u32,
+        };
+
+        pub const CaptureOptions = struct {
+            capture_type: u32 = 1,
+            cursor_mode: u32 = 2,
+            multiple: bool = false,
+            target_fps: u8 = 30,
+        };
     };
-
-    pub const Frame = struct {
-        data: []const u8,
-        width: u32,
-        height: u32,
-        stride: u32,
-        format: u32,
-    };
-
-    pub const CaptureOptions = struct {
-        capture_type: u32 = 1,
-        cursor_mode: u32 = 2,
-        multiple: bool = false,
-        target_fps: u8 = 30,
-    };
-};
 
 // Re-export commonly used types
 pub const Config = config.Config;
@@ -119,7 +141,7 @@ pub const NAME = "zig-hue-lightsync";
 
 /// Check if capture is available on this platform
 pub fn isCaptureAvailable() bool {
-    return builtin.os.tag == .linux;
+    return build_options.enable_capture;
 }
 
 test {

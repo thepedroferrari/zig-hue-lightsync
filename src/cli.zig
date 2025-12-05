@@ -12,6 +12,7 @@ pub const Command = union(enum) {
     start: StartOptions,
     stop: void,
     scene: SceneOptions,
+    gui: void,
     help: void,
     version: void,
 
@@ -71,7 +72,9 @@ pub fn parseArgs(allocator: std.mem.Allocator) !Command {
 
     if (std.mem.eql(u8, cmd_str, "pair")) {
         const ip = args.next() orelse return CliError.MissingArgument;
-        return .{ .pair = .{ .ip = ip } };
+        // Duplicate the string since args will be freed when this function returns
+        const ip_owned = try allocator.dupe(u8, ip);
+        return .{ .pair = .{ .ip = ip_owned } };
     }
 
     if (std.mem.eql(u8, cmd_str, "status")) {
@@ -87,7 +90,9 @@ pub fn parseArgs(allocator: std.mem.Allocator) !Command {
 
         while (args.next()) |arg| {
             if (std.mem.eql(u8, arg, "--area") or std.mem.eql(u8, arg, "-a")) {
-                opts.area_id = args.next() orelse return CliError.MissingArgument;
+                const area_str = args.next() orelse return CliError.MissingArgument;
+                // Duplicate the string since args will be freed when this function returns
+                opts.area_id = try allocator.dupe(u8, area_str);
             } else if (std.mem.eql(u8, arg, "--fps-tier") or std.mem.eql(u8, arg, "-f")) {
                 const tier_str = args.next() orelse return CliError.MissingArgument;
                 opts.fps_tier = config.Config.FpsTier.fromString(tier_str) orelse return CliError.InvalidArgument;
@@ -113,11 +118,16 @@ pub fn parseArgs(allocator: std.mem.Allocator) !Command {
             if (std.mem.eql(u8, arg, "--list") or std.mem.eql(u8, arg, "-l")) {
                 opts.list = true;
             } else if (!std.mem.startsWith(u8, arg, "-")) {
-                opts.name = arg;
+                // Duplicate the string since args will be freed when this function returns
+                opts.name = try allocator.dupe(u8, arg);
             }
         }
 
         return .{ .scene = opts };
+    }
+
+    if (std.mem.eql(u8, cmd_str, "gui")) {
+        return .gui;
     }
 
     if (std.mem.eql(u8, cmd_str, "help") or std.mem.eql(u8, cmd_str, "--help") or std.mem.eql(u8, cmd_str, "-h")) {
@@ -160,6 +170,8 @@ pub fn printHelp(writer: anytype) !void {
         \\    scene [NAME]          Apply a preset scene or list available scenes
         \\        -l, --list            List all available preset scenes
         \\        NAME                  Scene name: cozy, bright, reading, warm_amber, cool_focus, night
+        \\
+        \\    gui                   Launch the graphical interface (Linux + GTK4 only)
         \\
         \\    help                  Show this help message
         \\    version               Show version information
@@ -509,6 +521,26 @@ pub fn executeScene(allocator: std.mem.Allocator, opts: Command.SceneOptions, wr
         try writer.writeAll("\nApplying scene to lights...\n");
         try writer.writeAll("(Scene application via v2 API not yet implemented)\n");
     }
+}
+
+/// Execute the GUI command
+pub fn executeGui(allocator: std.mem.Allocator, writer: anytype) !void {
+    const root = @import("root.zig");
+
+    if (!root.gui.isSupported()) {
+        try writer.writeAll("GUI is only supported on Linux with GTK4.\n\n");
+        try writer.writeAll("Requirements:\n");
+        try writer.writeAll("  - Linux operating system\n");
+        try writer.writeAll("  - GTK4 libraries installed\n");
+        try writer.writeAll("  - Build with: zig build -Denable-gui=true\n");
+        return;
+    }
+
+    try writer.writeAll("Launching GUI...\n");
+
+    root.gui.launch(allocator) catch |err| {
+        try writer.print("GUI error: {}\n", .{err});
+    };
 }
 
 test "parse discover command" {
